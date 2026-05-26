@@ -1,0 +1,326 @@
+import SwiftUI
+
+struct NetworkSettingsView: View {
+    @ObservedObject var connectivitySettings: ConnectivitySettingsStore
+    @ObservedObject var appearanceSettings: ApplicationSettingsStore
+    
+    private var temporaryActivityDurationRange: ClosedRange<Double> {
+        Double(SettingsStoreBase.temporaryActivityDurationRange.lowerBound)...Double(SettingsStoreBase.temporaryActivityDurationRange.upperBound)
+    }
+    
+    private var vpnAppearanceStyle: Binding<VPNAppearanceStyle> {
+        Binding(
+            get: { connectivitySettings.isVPNDetailVisible ? .detailed : .compact },
+            set: { connectivitySettings.isVPNDetailVisible = $0 == .detailed }
+        )
+    }
+    
+    private var isDetailedVPNStyle: Bool {
+        vpnAppearanceStyle.wrappedValue == .detailed
+    }
+
+    private var isHotspotDefaultStrokeLocked: Bool {
+        appearanceSettings.isDefaultActivityStrokeEnabled
+    }
+
+    private var hotspotPreviewStrokeColor: Color {
+        guard appearanceSettings.isShowNotchStrokeEnabled else {
+            return .clear
+        }
+
+        if appearanceSettings.isDefaultActivityStrokeEnabled || connectivitySettings.isHotspotDefaultStrokeEnabled {
+            return .white.opacity(0.2)
+        }
+
+        return .green.opacity(0.2)
+    }
+
+    private var vpnPreviewStrokeColor: Color {
+        appearanceSettings.isShowNotchStrokeEnabled ? .white.opacity(0.2) : .clear
+    }
+    
+    var body: some View {
+        SettingsPageScrollView {
+            networkActivity
+            networkDuration
+            vpnAppearance
+            hotspotAppearance
+        }
+    }
+    
+    private var networkActivity: some View {
+        SettingsCard(title: L10n.appKey("settings.network.activity", fallback: "Network activity")) {
+            SettingsToggleRow(
+                title: L10n.appKey("settings.network.wifi.title", fallback: "Wi-Fi temporary activity"),
+                description: L10n.appKey("settings.network.wifi.description", fallback: "Show a short notification when Wi-Fi reconnects."),
+                systemImage: "wifi",
+                color: .blue,
+                isOn: $connectivitySettings.isWifiTemporaryActivityEnabled,
+                accessibilityIdentifier: "settings.activities.temporary.wifi"
+            )
+            
+            Divider()
+                .opacity(0.6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            
+            SettingsToggleRow(
+                title: L10n.appKey("settings.network.vpn.title", fallback: "VPN temporary activity"),
+                description: L10n.appKey("settings.network.vpn.description", fallback: "Show a short notification when a VPN connection becomes active."),
+                systemImage: "network",
+                color: .blue,
+                isOn: $connectivitySettings.isVpnTemporaryActivityEnabled,
+                accessibilityIdentifier: "settings.activities.temporary.vpn"
+            )
+            
+            Divider()
+                .opacity(0.6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+
+            SettingsToggleRow(
+                title: L10n.appKey("settings.network.noInternet.title", fallback: "No internet temporary activity"),
+                description: L10n.appKey("settings.network.noInternet.description", fallback: "Show a short notification when your Mac loses internet access."),
+                systemImage: "wifi.slash",
+                color: .red,
+                isOn: $connectivitySettings.isNoInternetTemporaryActivityEnabled,
+                accessibilityIdentifier: "settings.activities.temporary.noInternet"
+            )
+
+            Divider()
+                .opacity(0.6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            
+            SettingsToggleRow(
+                title: L10n.appKey("settings.network.hotspot.title", fallback: "Personal Hotspot live activity"),
+                description: L10n.appKey("settings.network.hotspot.description", fallback: "Show a live activity while Personal Hotspot is enabled."),
+                systemImage: "personalhotspot",
+                color: .green,
+                isOn: $connectivitySettings.isHotspotLiveActivityEnabled,
+                accessibilityIdentifier: "settings.activities.live.hotspot"
+            )
+        }
+    }
+    
+    private var networkDuration: some View {
+        SettingsCard(title: L10n.appKey("settings.network.duration", fallback: "Network duration")) {
+            SettingsSliderRow(
+                title: L10n.appKey("settings.network.wifiDuration.title", fallback: "Wi-Fi duration"),
+                description: L10n.appKey("settings.network.wifiDuration.description", fallback: "Choose how long the Wi-Fi reconnect notification stays visible."),
+                range: temporaryActivityDurationRange,
+                step: 1,
+                fractionLength: 0,
+                suffix: "s",
+                accessibilityIdentifier: "settings.activities.temporary.wifi.duration",
+                value: Binding(
+                    get: { Double(connectivitySettings.wifiTemporaryActivityDuration) },
+                    set: { connectivitySettings.wifiTemporaryActivityDuration = Int($0.rounded()) }
+                )
+            )
+            .disabled(!connectivitySettings.isWifiTemporaryActivityEnabled)
+            .opacity(connectivitySettings.isWifiTemporaryActivityEnabled ? 1 : 0.5)
+            
+            Divider().opacity(0.6)
+            
+            SettingsSliderRow(
+                title: L10n.appKey("settings.network.vpnDuration.title", fallback: "VPN duration"),
+                description: L10n.appKey("settings.network.vpnDuration.description", fallback: "Choose how long the VPN connection notification stays visible."),
+                range: temporaryActivityDurationRange,
+                step: 1,
+                fractionLength: 0,
+                suffix: "s",
+                accessibilityIdentifier: "settings.activities.temporary.vpn.duration",
+                value: Binding(
+                    get: { Double(connectivitySettings.vpnTemporaryActivityDuration) },
+                    set: { connectivitySettings.vpnTemporaryActivityDuration = Int($0.rounded()) }
+                )
+            )
+            .disabled(!connectivitySettings.isVpnTemporaryActivityEnabled)
+            .opacity(connectivitySettings.isVpnTemporaryActivityEnabled ? 1 : 0.5)
+        }
+    }
+    
+    private var vpnAppearance: some View {
+        SettingsCard(title: L10n.appKey("settings.network.vpnAppearance", fallback: "VPN appearance")) {
+            CustomPicker(
+                selection: vpnAppearanceStyle,
+                options: Array(VPNAppearanceStyle.allCases),
+                title: { $0.title },
+                headerTitle: L10n.appKey("settings.network.vpnStyle.title", fallback: "VPN style"),
+                headerDescription: L10n.appKey("settings.network.vpnStyle.description", fallback: "Choose whether the VPN activity stays compact or shows tunnel details."),
+                itemHeight: 72,
+                lightBackgroundImage: Image("backgroundLight"),
+                darkBackgroundImage: Image("backgroundDark")
+            ) { style, isSelected in
+                vpnAppearancePickerContent(for: style, isSelected: isSelected, isTimerVisible: connectivitySettings.isVPNTimerVisible)
+            }
+            .accessibilityIdentifier("settings.activities.temporary.vpn.style")
+            
+            Divider()
+                .opacity(0.6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            
+            SettingsToggleRow(
+                title: L10n.appKey("settings.network.notifyOnChange.title", fallback: "Only notify on network change"),
+                description: L10n.appKey("settings.network.notifyOnChange.description", fallback: "Only show Wi-Fi or VPN notifications when the connected network actually changes."),
+                systemImage: "point.3.connected.trianglepath.dotted",
+                color: .red,
+                isOn: $connectivitySettings.isOnlyNotifyOnNetworkChangeEnabled,
+                accessibilityIdentifier: "settings.activities.temporary.network.changeOnly"
+            )
+        }
+    }
+    
+    private var hotspotAppearance: some View {
+        SettingsCard(title: L10n.appKey("settings.network.hotspotAppearance", fallback: "Hotspot appearance")) {
+            CustomPicker(
+                selection: $connectivitySettings.hotspotAppearanceStyle,
+                options: Array(HotspotAppearanceStyle.allCases),
+                title: { $0.title },
+                headerTitle: L10n.appKey("settings.network.hotspotStyle.title", fallback: "Appearance"),
+                headerDescription: L10n.appKey("settings.network.hotspotStyle.description", fallback: "Choose whether the hotspot activity stays minimal or shows more status."),
+                itemHeight: 72,
+                lightBackgroundImage: Image("backgroundLight"),
+                darkBackgroundImage: Image("backgroundDark")
+            ) { style, isSelected in
+                hotspotAppearancePickerContent(for: style, isSelected: isSelected)
+            }
+
+            Divider().opacity(0.6)
+
+            SettingsStrokeToggleRow(
+                title: L10n.appKey("settings.network.hotspotDefaultStroke.title", fallback: "Default stroke"),
+                description: L10n.appKey("settings.network.hotspotDefaultStroke.description", fallback: "Use the standard white notch stroke instead of the hotspot accent stroke."),
+                isOn: $connectivitySettings.isHotspotDefaultStrokeEnabled,
+                accessibilityIdentifier: "settings.activities.live.hotspot.defaultStroke"
+            )
+            .disabled(isHotspotDefaultStrokeLocked)
+            .opacity(isHotspotDefaultStrokeLocked ? 0.5 : 1)
+        }
+    }
+    
+    @ViewBuilder
+    private func vpnAppearancePickerContent(for style: VPNAppearanceStyle, isSelected: Bool, isTimerVisible: Bool) -> some View {
+        switch style {
+        case .compact:
+            ZStack {
+                Capsule()
+                    .fill(.black)
+                    .overlay {
+                        Capsule()
+                            .stroke(vpnPreviewStrokeColor, lineWidth: 1)
+                    }
+                HStack {
+                    ZStack {
+                        Capsule()
+                            .fill(Color.accentColor.gradient)
+                            .frame(width: 40, height: 20)
+                        
+                        Image(systemName: "network.badge.shield.half.filled")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Color.white.gradient)
+                    }
+                    
+                    Spacer()
+                    
+                    Text(verbatim: "Active")
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+                }
+                .padding(.leading, 5)
+                .padding(.trailing, 10)
+            }
+            .frame(width: 200, height: 30)
+            .scaleEffect(isSelected ? 1 : 0.97)
+            
+        case .detailed:
+            ZStack {
+                Capsule()
+                    .fill(.black)
+                    .overlay {
+                        Capsule()
+                            .stroke(vpnPreviewStrokeColor, lineWidth: 1)
+                    }
+                HStack {
+                    HStack(spacing: 10) {
+                        Image(systemName: "network.badge.shield.half.filled")
+                            .font(.system(size: 20))
+                            .foregroundStyle(.white.opacity(0.8))
+                        
+                        VStack(alignment: .leading, spacing: 0) {
+                            Text(verbatim: "Connected")
+                                .lineLimit(1)
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.4))
+                            
+                            Text("WireGuard VPN")
+                                .lineLimit(1)
+                                .font(.system(size: 12))
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                    
+                    Spacer()
+                
+                    Text("00:10")
+                        .font(.system(size: 14, design: .rounded))
+                        .foregroundStyle(.orange)
+                        .monospacedDigit()
+                        .contentTransition(.numericText())
+                }
+                .padding(.horizontal, 12)
+            }
+            .frame(width: 210, height: 50)
+            .scaleEffect(isSelected ? 1 : 0.97)
+        }
+    }
+    
+    @ViewBuilder
+    private func hotspotAppearancePickerContent(for style: HotspotAppearanceStyle, isSelected: Bool) -> some View {
+        switch style {
+        case .minimal:
+            ZStack {
+                Capsule()
+                    .fill(.black)
+                    .overlay {
+                        Capsule()
+                            .stroke(hotspotPreviewStrokeColor, lineWidth: 1)
+                    }
+                
+                HStack {
+                    Image(systemName: "personalhotspot")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.green)
+                    
+                    Spacer()
+                }
+                .padding(.horizontal, 7)
+            }
+            .frame(width: 160, height: 30)
+            .scaleEffect(isSelected ? 1 : 0.97)
+            
+        case .detailed:
+            ZStack {
+                Capsule()
+                    .fill(.black)
+                    .overlay {
+                        Capsule()
+                            .stroke(hotspotPreviewStrokeColor, lineWidth: 1)
+                    }
+                
+                HStack(spacing: 10) {
+                    Image(systemName: "personalhotspot")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.green)
+                    
+                    Spacer()
+                    
+                    Text(verbatim: "On")
+                        .foregroundStyle(.green.opacity(0.8))
+                }
+                .padding(.leading, 7)
+                .padding(.trailing, 10)
+            }
+            .frame(width: 160, height: 30)
+            .scaleEffect(isSelected ? 1 : 0.97)
+        }
+    }
+}

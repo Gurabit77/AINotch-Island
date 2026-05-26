@@ -1,0 +1,201 @@
+[
+  {
+    "name": "Claude Code",
+    "source": "claude",
+    "agentType": "claudeCode",
+    "processPatterns": ["node.*/bin/claude\\b", "^claude$", "/claude\\s", "npx\\s+claude"],
+    "hookSupport": "full",
+    "icon": "brain.head.profile",
+    "configPaths": ["~/.claude/"]
+  },
+  {
+    "name": "Codex",
+    "source": "codex",
+    "agentType": "codex",
+    "processPatterns": ["node.*/bin/codex\\b", "/codex\\s", "npx\\s+codex", "codex/codex$"],
+    "bundleIdentifiers": ["com.openai.codex"],
+    "appNamePrefixes": ["Codex"],
+    "hookSupport": "full",
+    "icon": "terminal",
+    "configPaths": ["~/.codex/"]
+  },
+  {
+    "name": "Cursor",
+    "source": "cursor",
+    "agentType": "cursor",
+    "bundleIdentifiers": ["com.todesktop.230313mzl4w4u92"],
+    "hookSupport": "full",
+    "icon": "cursorarrow.rays",
+    "configPaths": ["~/.cursor/"]
+  },
+  {
+    "name": "Kiro",
+    "source": "kiro",
+    "agentType": "kiro",
+    "processPatterns": ["kiro_cli_desktop", "(^|/)kiro-cli(\\s|$)", "(^|/)kiro-cli-chat"],
+    "appNamePrefixes": ["Kiro"],
+    "bundleIdentifiers": ["com.amazon.kiro"],
+    "hookSupport": "basic",
+    "icon": "bolt.fill"
+  },
+  {
+    "name": "Windsurf",
+    "source": "windsurf",
+    "agentType": "windsurf",
+    "appNamePrefixes": ["Windsurf"],
+    "bundleIdentifiers": ["com.codeium.windsurf"],
+    "hookSupport": "none",
+    "icon": "wind"
+  },
+  {
+    "name": "Gemini CLI",
+    "source": "gemini",
+    "agentType": "geminiCLI",
+    "processPatterns": ["node.*/bin/gemini\\b", "gemini-cli", "npx\\s+gemini"],
+    "hookSupport": "none",
+    "icon": "sparkles"
+  },
+  {
+    "name": "Hermes",
+    "source": "hermes",
+    "agentType": "hermes",
+    "processPatterns": ["hermes_cli\\.main gateway", "/bin/hermes\\b", "python.*/hermes", "tirith"],
+    "pidFile": "~/.hermes/gateway.pid",
+    "hookSupport": "partial",
+    "icon": "message.fill"
+  },
+  {
+    "name": "OpenClaw",
+    "source": "openclaw",
+    "agentType": "openClaw",
+    "processPatterns": ["openclaw-gateway"],
+    "port": 18789,
+    "hookSupport": "none",
+    "icon": "ant.fill"
+  },
+  {
+    "name": "Amp",
+    "source": "amp",
+    "agentType": "amp",
+    "processPatterns": ["amp-cli", "node.*/bin/amp\\b", "/amp\\s+--"],
+    "hookSupport": "full",
+    "icon": "bolt.horizontal.fill",
+    "configPaths": ["~/.config/amp/"]
+  },
+  {
+    "name": "DeepSeek",
+    "source": "deepseek",
+    "agentType": "deepSeek",
+    "processPatterns": ["deepseek-cli"],
+    "hookSupport": "none",
+    "icon": "magnifyingglass"
+  },
+  {
+    "name": "Copilot CLI",
+    "source": "copilot",
+    "agentType": "copilot",
+    "appNamePrefixes": ["ima.copilot", "GitHub Copilot"],
+    "hookSupport": "none",
+    "icon": "airplane"
+  },
+  {
+    "name": "OpenCode",
+    "source": "opencode",
+    "agentType": "openCode",
+    "processPatterns": ["node.*/bin/opencode\\b", "/opencode\\s", "npx\\s+opencode"],
+    "hookSupport": "none",
+    "icon": "chevron.left.forwardslash.chevron.right"
+  },
+  {
+    "name": "Aider",
+    "source": "aider",
+    "agentType": "aider",
+    "processPatterns": ["/bin/aider\\b", "python.*-m\\s+aider", "python.*/aider"],
+    "hookSupport": "none",
+    "icon": "wrench.and.screwdriver",
+    "configPaths": ["~/.aider.conf.yml"]
+  },
+  {
+    "name": "Droid",
+    "source": "droid",
+    "agentType": "droid",
+    "processPatterns": ["droid"],
+    "hookSupport": "none",
+    "icon": "cpu",
+    "configPaths": ["~/.droid/"]
+  },
+  {
+    "name": "TRAE",
+    "source": "trae",
+    "agentType": "trae",
+    "appNamePrefixes": ["TRAE"],
+    "hookSupport": "none",
+    "icon": "rays"
+  },
+  {
+    "name": "Qoder",
+    "source": "qoder",
+    "agentType": "qoder",
+    "processPatterns": ["qoder"],
+    "hookSupport": "none",
+    "icon": "q.circle"
+  },
+  {
+    "name": "Qwen Code",
+    "source": "qwen",
+    "agentType": "qwen",
+    "processPatterns": ["qwen-code"],
+    "hookSupport": "none",
+    "icon": "character.textbox"
+  },
+  {
+    "name": "Kimi Code",
+    "source": "kimi",
+    "agentType": "kimiCode",
+    "processPatterns": ["kimi-code"],
+    "hookSupport": "none",
+    "icon": "moon.stars"
+  },
+  {
+    "name": "CodeBuddy",
+    "source": "codebuddy",
+    "agentType": "codeBuddy",
+    "processPatterns": ["codebuddy"],
+    "hookSupport": "none",
+    "icon": "person.2"
+  },
+  {
+    "name": "Pi Agent",
+    "source": "piagent",
+    "agentType": "piAgent",
+    "processPatterns": ["pi-agent", "piagent"],
+    "hookSupport": "none",
+    "icon": "circle.dotted"
+  },
+  {
+    "name": "MiMo Code",
+    "source": "mimo",
+    "agentType": "mimoCode",
+    "processPatterns": ["node.*/bin/mimo\\b", "/mimo\\s", "npx\\s+mimo"],
+    "hookSupport": "none",
+    "icon": "m.circle"
+  },
+  {
+    "name": "Claude Desktop",
+    "source": "claude-desktop",
+    "agentType": "claudeDesktop",
+    "bundleIdentifiers": ["com.anthropic.claudefordesktop"],
+    "appNamePrefixes": ["Claude"],
+    "hookSupport": "none",
+    "icon": "brain"
+  },
+  {
+    "name": "ChatGPT Desktop",
+    "source": "chatgpt",
+    "agentType": "chatGPT",
+    "bundleIdentifiers": ["com.openai.chat"],
+    "appNamePrefixes": ["ChatGPT"],
+    "hookSupport": "none",
+    "icon": "bubble.left.and.bubble.right"
+  }
+]

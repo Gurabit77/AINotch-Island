@@ -1,0 +1,306 @@
+import SwiftUI
+import Combine
+internal import AppKit
+import UniformTypeIdentifiers
+
+struct NotchView: View {
+    @Environment(\.openWindow) private var openWindow
+    @ObservedObject var notchViewModel: NotchViewModel
+    @ObservedObject var notchEventCoordinator: NotchEventCoordinator
+    @ObservedObject var powerViewModel: PowerViewModel
+    @ObservedObject var bluetoothViewModel: BluetoothViewModel
+    @ObservedObject var networkViewModel: NetworkViewModel
+    @ObservedObject var downloadViewModel: DownloadViewModel
+    @ObservedObject var focusViewModel: FocusViewModel
+    @ObservedObject var airDropViewModel: AirDropNotchViewModel
+    @ObservedObject var airDropController: NotchAirDropController
+    @ObservedObject var settingsViewModel: SettingsViewModel
+    @ObservedObject var nowPlayingViewModel: NowPlayingViewModel
+    @ObservedObject var timerViewModel: TimerViewModel
+    @ObservedObject var screenRecordingViewModel: ScreenRecordingViewModel
+    @ObservedObject var lockScreenManager: LockScreenManager
+    @ObservedObject var agentHaloViewModel: AgentHaloViewModel
+    @ObservedObject var externalDriveMonitor: ExternalDriveMonitor
+    @ObservedObject var screenshotMonitor: ScreenshotMonitor
+    @ObservedObject var externalDisplayMonitor: ExternalDisplayMonitor
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            notchBody
+                .environment(\.notchScale, notchViewModel.notchModel.scale)
+                .background(
+                    NotchEventHandlersView(
+                        notchEventCoordinator: notchEventCoordinator,
+                        powerViewModel: powerViewModel,
+                        bluetoothViewModel: bluetoothViewModel,
+                        networkViewModel: networkViewModel,
+                        downloadViewModel: downloadViewModel,
+                        focusViewModel: focusViewModel,
+                        airDropViewModel: airDropViewModel,
+                        settingsViewModel: settingsViewModel,
+                        nowPlayingViewModel: nowPlayingViewModel,
+                        timerViewModel: timerViewModel,
+                        screenRecordingViewModel: screenRecordingViewModel,
+                        lockScreenManager: lockScreenManager,
+                        agentHaloViewModel: agentHaloViewModel,
+                        externalDriveMonitor: externalDriveMonitor,
+                        screenshotMonitor: screenshotMonitor,
+                        externalDisplayMonitor: externalDisplayMonitor
+                    )
+                )
+                .overlay {
+                    DragAndDropDestinationView(
+                        isTargeted: $airDropController.isTargeted,
+                        targetedDropTarget: Binding(
+                            get: { airDropViewModel.targetedDropTarget },
+                            set: { airDropViewModel.setTargetedDropTarget($0) }
+                        ),
+                        mode: settingsViewModel.mediaAndFiles.dragAndDropActivityMode,
+                        onDropPasteboard: { target, pasteboard in
+                            switch target {
+                            case .airDrop:
+                                guard settingsViewModel.mediaAndFiles.dragAndDropActivityMode.showsAirDrop else {
+                                    return false
+                                }
+
+                                return airDropController.handlePasteboardDrop(pasteboard)
+                            case .tray:
+                                guard settingsViewModel.mediaAndFiles.dragAndDropActivityMode.showsTray else {
+                                    return false
+                                }
+
+                                return airDropController.handleTrayDrop(
+                                    pasteboard,
+                                    mode: settingsViewModel.mediaAndFiles.fileTrayUsageMode
+                                )
+                            case .fileConverter:
+                                guard settingsViewModel.mediaAndFiles.dragAndDropActivityMode.showsFileConverter else {
+                                    return false
+                                }
+
+                                return airDropController.handleFileConverterDrop(pasteboard)
+                            }
+                        }
+                    )
+                    .allowsHitTesting(notchViewModel.notchModel.temporaryNotificationContent == nil)
+                }
+                .onChange(of: notchViewModel.notchModel.content?.id) {
+                    notchViewModel.handleStrokeVisibility()
+                }
+                .onChange(of: settingsViewModel.notchWidth) {
+                    notchViewModel.updateDimensions()
+                }
+                .onChange(of: settingsViewModel.notchHeight) {
+                    notchViewModel.updateDimensions()
+                }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+private extension NotchView {
+    @ViewBuilder
+    var notchBody: some View {
+        notchSurface
+            .overlay {
+                contentOverlay
+                    .clipShape(
+                        NotchShape(
+                            topCornerRadius: notchViewModel.interactiveCornerRadius.top,
+                            bottomCornerRadius: notchViewModel.interactiveCornerRadius.bottom
+                        )
+                    )
+            }
+            .shadow(
+                color: notchViewModel.isDisplayingExpandedLiveActivity ? .black.opacity(0.5) : .clear,
+                radius: 15
+            )
+            .frame(
+                width: notchViewModel.presentedNotchSize.width,
+                height: notchViewModel.presentedNotchSize.height
+            )
+            .customNotchPressable(
+                notchViewModel: notchViewModel,
+                isPressed: $notchViewModel.isPressed,
+                baseSize: notchViewModel.presentedNotchSize
+            )
+            .offset(y: 1)
+            .customNotchMouseSwipeable(
+                notchViewModel: notchViewModel,
+                isEnabled: shouldEnableNotchSwipeGestures
+            )
+            .customNotchSwipeDismissable(
+                notchViewModel: notchViewModel,
+                isEnabled: shouldEnableNotchSwipeGestures
+            )
+            .contextMenu {
+                contextMenuItem
+            }
+            .environment(\.colorScheme, .dark)
+            .animation(notchViewModel.animations.strokeVisibility, value: notchViewModel.shouldRenderStroke)
+            .animation(notchViewModel.animations.strokeVisibility, value: settingsViewModel.isShowNotchStrokeEnabled)
+            .animation(notchViewModel.animations.notchVisibility, value: notchViewModel.showNotch)
+    }
+    
+    var shouldEnableNotchSwipeGestures: Bool {
+        guard !notchViewModel.isActivityPresentationHidden else { return false }
+        
+        return !(
+            notchViewModel.notchModel.isPresentingExpandedLiveActivity &&
+            notchViewModel.notchModel.content?.id == NotchContentRegistry.DragAndDrop.trayActive.id
+        )
+    }
+    
+    var visibleStrokeColor: Color {
+        notchViewModel.displayedContent?.strokeColor ?? notchViewModel.cachedStrokeColor
+    }
+    
+    @ViewBuilder
+    var notchSurface: some View {
+        NotchBackgroundSurface(
+            style: settingsViewModel.application.notchBackgroundStyle,
+            topCornerRadius: notchViewModel.interactiveCornerRadius.top,
+            bottomCornerRadius: notchViewModel.interactiveCornerRadius.bottom,
+            strokeColor: shouldShowStroke ? visibleStrokeColor : .clear,
+            strokeWidth: settingsViewModel.notchStrokeWidth
+        )
+    }
+    
+    var shouldShowStroke: Bool {
+        settingsViewModel.isShowNotchStrokeEnabled &&
+        notchViewModel.shouldRenderStroke
+    }
+    
+    @ViewBuilder
+    var contentOverlay: some View {
+        if let content = notchViewModel.displayedContent {
+            renderedContentView(for: content)
+                .padding(.top, notchViewModel.isDisplayingExpandedLiveActivity ? 0 : notchViewModel.compactContentTopInset)
+            .resizeAwareBlur(
+                size: notchViewModel.interactiveNotchSize,
+                interactiveBlur: notchViewModel.contentResizeBlurRadius,
+                interactiveOpacity: notchViewModel.contentResizeOpacity
+            )
+            .id(notchViewModel.displayedPresentationID)
+            .transition(
+                notchViewModel.contentTransition(
+                    notchWidth: notchViewModel.presentedNotchSize.width,
+                    notchHeight: notchViewModel.presentedNotchSize.height,
+                    baseHeight: notchViewModel.notchModel.baseHeight,
+                    isExpandedPresentation: notchViewModel.isDisplayingExpandedLiveActivity,
+                    isCompactRemovalForExpansion: notchViewModel.isExpandingLiveActivityTransition
+                )
+            )
+        }
+    }
+    
+    @MainActor
+    @ViewBuilder
+    func renderedContentView(for content: NotchContentProtocol) -> some View {
+        if notchViewModel.isDisplayingExpandedLiveActivity {
+            content.makeExpandedView()
+        } else {
+            content.makeView()
+        }
+    }
+    
+    @ViewBuilder
+    var contextMenuItem: some View {
+        Button {
+            if !SettingsWindowCoordinator.activateExisting() {
+                openWindow(id: WindowsScene.settings)
+                SettingsWindowCoordinator.activate()
+            }
+        } label: {
+            Image(systemName: "gearshape")
+            Text(verbatim: L10n.app("notch.contextMenu.settings", fallback: "Settings"))
+        }
+
+        Divider()
+
+        Button(action: { AppRelauncher.restartApp() }) {
+            Image(systemName: "arrow.trianglehead.2.counterclockwise.rotate.90")
+            Text(verbatim: L10n.app("notch.contextMenu.restart", fallback: "Restart"))
+        }
+
+        Button(action: { NSApp.terminate(nil) }) {
+            Image(systemName: "rectangle.portrait.and.arrow.right")
+            Text(verbatim: L10n.app("notch.contextMenu.quit", fallback: "Quit"))
+        }
+    }
+}
+
+private struct NotchEventHandlersView: View {
+    let notchEventCoordinator: NotchEventCoordinator
+    let powerViewModel: PowerViewModel
+    let bluetoothViewModel: BluetoothViewModel
+    let networkViewModel: NetworkViewModel
+    let downloadViewModel: DownloadViewModel
+    let focusViewModel: FocusViewModel
+    let airDropViewModel: AirDropNotchViewModel
+    let settingsViewModel: SettingsViewModel
+    let nowPlayingViewModel: NowPlayingViewModel
+    let timerViewModel: TimerViewModel
+    let screenRecordingViewModel: ScreenRecordingViewModel
+    let lockScreenManager: LockScreenManager
+    let agentHaloViewModel: AgentHaloViewModel
+    let externalDriveMonitor: ExternalDriveMonitor
+    let screenshotMonitor: ScreenshotMonitor
+    let externalDisplayMonitor: ExternalDisplayMonitor
+    
+    var body: some View {
+        Color.clear
+            .onReceive(powerViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handlePowerEvent(event)
+            }
+            .onReceive(bluetoothViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleBluetoothEvent(event)
+            }
+            .onReceive(networkViewModel.$networkEvent.compactMap { $0 }) { event in
+                notchEventCoordinator.handleNetworkEvent(event)
+            }
+            .onReceive(downloadViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleDownloadEvent(event)
+            }
+            .onReceive(focusViewModel.$focusEvent.compactMap { $0 }) { event in
+                notchEventCoordinator.handleFocusEvent(event)
+            }
+            .onReceive(airDropViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleAirDropEvent(event)
+            }
+            .onReceive(settingsViewModel.notchSizeEvent) { event in
+                notchEventCoordinator.handleNotchWidthEvent(event)
+            }
+            .onReceive(nowPlayingViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleNowPlayingEvent(event)
+            }
+            .onReceive(timerViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleTimerEvent(event)
+            }
+            .onReceive(screenRecordingViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleScreenRecordingEvent(event)
+            }
+            .onReceive(lockScreenManager.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleLockScreenEvent(event)
+            }
+            .onReceive(agentHaloViewModel.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleAgentHaloEvent(event)
+            }
+            .onReceive(externalDriveMonitor.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleExternalDriveEvent(event)
+            }
+            .onReceive(screenshotMonitor.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleScreenshotEvent(event)
+            }
+            .onReceive(externalDisplayMonitor.$event.compactMap { $0 }) { event in
+                notchEventCoordinator.handleExternalDisplayEvent(event)
+            }
+            .onAppear {
+                notchEventCoordinator.handleAgentHaloEvent(.agentsActive)
+                externalDriveMonitor.start()
+                screenshotMonitor.start()
+                externalDisplayMonitor.start()
+                notchEventCoordinator.showBuddyIdleIfNeeded()
+            }
+    }
+}

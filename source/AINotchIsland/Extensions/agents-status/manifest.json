@@ -1,0 +1,17 @@
+{
+    "id": "com.agenthalo.agents-status",
+    "name": "Agents Status",
+    "version": "1.0.0",
+    "description": "Shows a compact view of active AI agents and their status",
+    "author": "AINotchIsland",
+    "entry": "index.js",
+    "icon": "circle.hexagongrid.fill",
+    "permissions": ["agents"],
+    "notchConfig": {
+        "compactWidth": 100,
+        "expandedWidth": 280,
+        "expandedHeight": 240,
+        "expandable": true,
+        "strokeColor": "green"
+    }
+}

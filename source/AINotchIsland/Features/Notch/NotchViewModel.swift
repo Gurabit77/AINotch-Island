@@ -1,0 +1,586 @@
+import SwiftUI
+import Combine
+
+typealias NotchScreenMetrics = (width: CGFloat, topInset: CGFloat, notchSize: CGSize?)
+
+enum NotchSwipeInteraction {
+    case dismiss
+    case restore
+}
+
+private enum SwipeFeedbackMetrics {
+    static let restoreHeightExpansion: CGFloat = 10
+    static let collapsedDismissWidthFactor: CGFloat = 0.18
+    static let collapsedDismissMinimumWidth: CGFloat = 28
+    static let collapsedDismissMaximumWidth: CGFloat = 44
+    static let expandedDismissHeightFactor: CGFloat = 0.16
+    static let expandedDismissMinimumHeight: CGFloat = 12
+    static let expandedDismissMaximumHeight: CGFloat = 28
+    static let restoreCornerRadiusExpansion: CGFloat = 4
+    static let expandedDismissCornerRadiusReduction: CGFloat = 4
+    static let dismissBlurRadius: CGFloat = 7
+    static let restoreBlurRadius: CGFloat = 4
+    static let dismissOpacityReduction: Double = 0.8
+    static let restoreOpacityReduction: Double = 0.5
+}
+
+private enum SurfaceResizeMetrics {
+    static let heightLeadDeltaFactor: CGFloat = 0.24
+    static let heightLeadDeltaMinimum: CGFloat = 6
+    static let heightLeadDeltaMaximum: CGFloat = 28
+    static let heightFollowUpDelay: TimeInterval = 0.1
+}
+
+private enum ExpansionTransitionTiming {
+    static let preparationDelay: UInt64 = 16_000_000
+    static let resetDelay: UInt64 = 120_000_000
+}
+
+@MainActor
+final class NotchViewModel: ObservableObject {
+    @Published private(set) var notchModel = NotchModel()
+    @Published private(set) var swipeStretchProgress: CGFloat = 0
+    @Published private(set) var swipeInteraction: NotchSwipeInteraction?
+    @Published private(set) var stagedNotchHeight: CGFloat = NotchModel().baseHeight
+    @Published private(set) var isExpandingLiveActivityTransition = false
+    @Published private(set) var isActivityPresentationHidden = false
+    
+    @Published var showNotch = false
+    @Published var isPressed = false
+    @Published var cachedStrokeColor: Color = .clear
+
+    private let settings: NotchSettingsProviding
+    private let engine: NotchEngine
+    private let screenMetricsProvider: (any NotchSettingsProviding) -> NotchScreenMetrics?
+    private var cancellables = Set<AnyCancellable>()
+    private var stagedHeightTask: Task<Void, Never>?
+    private var expansionTransitionTask: Task<Void, Never>?
+    private var swipeStretchResetWorkItem: DispatchWorkItem?
+    private var isClosingHeightStaged = false
+
+    var animations: NotchAnimations {
+        engine.animations
+    }
+
+    var surfaceSizeAnimation: Animation? {
+        isSwipeInteractionActive ? nil : animations.contentUpdate
+    }
+
+    var displayedContent: NotchContentProtocol? {
+        displayedNotchModel.content
+    }
+
+    var displayedPresentationID: String? {
+        displayedNotchModel.presentationID
+    }
+
+    var isDisplayingExpandedLiveActivity: Bool {
+        displayedNotchModel.isPresentingExpandedLiveActivity
+    }
+
+    var shouldRenderStroke: Bool {
+        displayedContent != nil || isHoldingStrokeAfterContentHide
+    }
+
+    var presentedNotchSize: CGSize {
+        let size = interactiveNotchSize
+
+        guard !isSwipeInteractionActive, isClosingHeightStaged else {
+            return size
+        }
+
+        return CGSize(
+            width: size.width,
+            height: stagedNotchHeight
+        )
+    }
+
+    var isSwipeInteractionActive: Bool {
+        swipeInteraction != nil
+    }
+    
+    var canExpandActiveLiveActivity: Bool {
+        guard !isActivityPresentationHidden else { return false }
+        return engine.canExpandActiveLiveActivity
+    }
+
+    var compactContentTopInset: CGFloat {
+        let hwNotchHeight = notchModel.hardwareNotchHeight
+        guard hwNotchHeight > 0 else { return 4 }
+        return hwNotchHeight * 0.7
+    }
+    
+    var shouldExpandActiveContentOnClick: Bool {
+        settings.isNotchTapToExpandEnabled &&
+        settings.notchExpandInteraction == .click &&
+        canExpandActiveLiveActivity
+    }
+
+    var shouldExpandActiveContentOnPressAndHold: Bool {
+        settings.isNotchTapToExpandEnabled &&
+        settings.notchExpandInteraction == .pressAndHold &&
+        canExpandActiveLiveActivity
+    }
+
+    var shouldExpandActiveContentOnHover: Bool {
+        settings.isNotchTapToExpandEnabled &&
+        settings.notchExpandInteraction == .hover &&
+        canExpandActiveLiveActivity
+    }
+
+    var notchPressHoldDuration: TimeInterval {
+        settings.notchPressHoldDuration
+    }
+
+    var notchHoverExpandDelay: TimeInterval {
+        settings.notchPressHoldDuration
+    }
+    
+    var canRestoreDismissedContent: Bool {
+        engine.canRestoreDismissedContent
+    }
+
+    var canOpenActiveWindowLink: Bool {
+        guard !isActivityPresentationHidden else { return false }
+        return engine.canOpenActiveWindowLink
+    }
+    
+    var canDismissWithMouseDrag: Bool {
+        settings.isNotchMouseDragGesturesEnabled &&
+        settings.isNotchSwipeDismissEnabled &&
+        !isActivityPresentationHidden &&
+        !notchModel.isLiveActivityExpanded &&
+        notchModel.content != nil
+    }
+    
+    var canRestoreWithMouseDrag: Bool {
+        settings.isNotchMouseDragGesturesEnabled &&
+        settings.isNotchSwipeRestoreEnabled &&
+        canRestoreDismissedContent
+    }
+    
+    var canDismissWithTrackpadSwipe: Bool {
+        settings.isNotchTrackpadSwipeGesturesEnabled &&
+        settings.isNotchSwipeDismissEnabled &&
+        !isActivityPresentationHidden &&
+        !notchModel.isLiveActivityExpanded &&
+        notchModel.content != nil
+    }
+    
+    var canRestoreWithTrackpadSwipe: Bool {
+        settings.isNotchTrackpadSwipeGesturesEnabled &&
+        settings.isNotchSwipeRestoreEnabled &&
+        canRestoreDismissedContent
+    }
+    
+    var interactiveNotchSize: CGSize {
+        let model = displayedNotchModel
+        let baseSize = model.size
+        let progress = easedSwipeStretchProgress
+        
+        switch swipeInteraction {
+        case .dismiss:
+            if model.isPresentingExpandedLiveActivity {
+                let heightCompression = min(
+                    max(baseSize.height * SwipeFeedbackMetrics.expandedDismissHeightFactor, SwipeFeedbackMetrics.expandedDismissMinimumHeight),
+                    SwipeFeedbackMetrics.expandedDismissMaximumHeight
+                )
+                
+                return CGSize(
+                    width: baseSize.width,
+                    height: max(model.baseHeight, baseSize.height - (heightCompression * progress))
+                )
+            }
+            
+            let widthCompression = min(
+                max(baseSize.width * SwipeFeedbackMetrics.collapsedDismissWidthFactor, SwipeFeedbackMetrics.collapsedDismissMinimumWidth),
+                SwipeFeedbackMetrics.collapsedDismissMaximumWidth
+            )
+            
+            return CGSize(
+                width: max(baseSize.height, baseSize.width - (widthCompression * progress)),
+                height: baseSize.height
+            )
+            
+        case .restore:
+            return CGSize(
+                width: baseSize.width,
+                height: baseSize.height + (SwipeFeedbackMetrics.restoreHeightExpansion * progress)
+            )
+            
+        case nil:
+            return baseSize
+        }
+    }
+    
+    var interactiveCornerRadius: (top: CGFloat, bottom: CGFloat) {
+        let model = displayedNotchModel
+        let baseCornerRadius = model.cornerRadius
+        let progress = easedSwipeStretchProgress
+        
+        switch swipeInteraction {
+        case .dismiss:
+            if model.isPresentingExpandedLiveActivity {
+                return (
+                    top: baseCornerRadius.top,
+                    bottom: max(
+                        baseCornerRadius.top,
+                        baseCornerRadius.bottom - (SwipeFeedbackMetrics.expandedDismissCornerRadiusReduction * progress)
+                    )
+                )
+            }
+            
+            return baseCornerRadius
+            
+        case .restore:
+            return (
+                top: baseCornerRadius.top,
+                bottom: baseCornerRadius.bottom + (SwipeFeedbackMetrics.restoreCornerRadiusExpansion * progress)
+            )
+            
+        case nil:
+            return baseCornerRadius
+        }
+    }
+    
+    var contentResizeBlurRadius: CGFloat {
+        let progress = easedSwipeStretchProgress
+        
+        switch swipeInteraction {
+        case .dismiss:
+            return SwipeFeedbackMetrics.dismissBlurRadius * progress
+            
+        case .restore:
+            return SwipeFeedbackMetrics.restoreBlurRadius * progress
+            
+        case nil:
+            return 0
+        }
+    }
+    
+    var contentResizeOpacity: Double {
+        let progress = Double(easedSwipeStretchProgress)
+        
+        switch swipeInteraction {
+        case .dismiss:
+            return max(0, 1 - (SwipeFeedbackMetrics.dismissOpacityReduction * progress))
+            
+        case .restore:
+            return max(0, 1 - (SwipeFeedbackMetrics.restoreOpacityReduction * progress))
+            
+        case nil:
+            return 1
+        }
+    }
+    
+    
+    init(
+        settings: NotchSettingsProviding,
+        animations: NotchAnimations? = nil,
+        hideDelay: TimeInterval? = nil,
+        queueDelay: TimeInterval? = nil,
+        engine: NotchEngine? = nil,
+        screenMetricsProvider: (((any NotchSettingsProviding) -> NotchScreenMetrics?))? = nil
+    ) {
+        self.settings = settings
+        self.engine = engine ?? NotchEngine(
+            animations: {
+                animations ?? .preset(settings.notchAnimationPreset)
+            },
+            hideDelay: hideDelay,
+            queueDelay: queueDelay
+        )
+        self.screenMetricsProvider = screenMetricsProvider ?? { settings in
+            NSScreen.metrics(for: settings)
+        }
+        updateDimensions()
+        bindEngine()
+    }
+
+    func updateDimensions() {
+        guard let screenMetrics = screenMetricsProvider(settings) else {
+            return
+        }
+
+        let screenWidth = screenMetrics.width
+        let baseScreenWidth: CGFloat = 1440.0
+        let scale = max(0.35, screenWidth / baseScreenWidth)
+
+        let widthOffset = CGFloat(settings.notchWidth)
+        let heightOffset = CGFloat(settings.notchHeight)
+
+        if let notchSize = screenMetrics.notchSize {
+            let contentArea: CGFloat = 32.scaled(by: scale)
+            let computedHeight = notchSize.height + contentArea
+
+            engine.updateBaseGeometry(
+                width: notchSize.width + 24.scaled(by: scale) + widthOffset,
+                height: computedHeight + heightOffset,
+                scale: scale,
+                hardwareNotchHeight: notchSize.height
+            )
+        } else {
+            engine.updateBaseGeometry(
+                width: (200 * scale) + widthOffset,
+                height: (42 * scale) + heightOffset,
+                scale: scale
+            )
+        }
+    }
+    
+    func send(_ notchState: NotchState) {
+        engine.send(notchState)
+    }
+
+    func setActivityPresentationHidden(_ isHidden: Bool) {
+        guard isActivityPresentationHidden != isHidden else { return }
+
+        resetSwipeStretch()
+
+        withAnimation(animations.notchVisibility) {
+            isActivityPresentationHidden = isHidden
+        }
+    }
+    
+    func hideTemporaryNotification() {
+        engine.hideTemporaryNotification()
+    }
+    
+    func dismissActiveContent() {
+        if notchModel.isLiveActivityExpanded,
+           notchModel.liveActivityContent?.id == NotchContentRegistry.Media.timer.id {
+            engine.handleOutsideClick()
+            return
+        }
+        
+        engine.dismissActiveContent()
+    }
+    
+    func restoreDismissedContent() {
+        engine.restoreDismissedContent()
+    }
+
+    func openActiveWindowLink() {
+        engine.openActiveWindowLink()
+    }
+    
+    func updateSwipeStretch(for interaction: NotchSwipeInteraction, progress: CGFloat) {
+        swipeStretchResetWorkItem?.cancel()
+        swipeStretchResetWorkItem = nil
+
+        let clampedProgress = min(max(progress, 0), 1)
+        guard swipeInteraction != interaction || abs(swipeStretchProgress - clampedProgress) > 0.001 else {
+            return
+        }
+
+        swipeInteraction = interaction
+        swipeStretchProgress = clampedProgress
+    }
+    
+    func resetSwipeStretch() {
+        guard swipeStretchProgress > 0 || swipeInteraction != nil else { return }
+
+        swipeStretchResetWorkItem?.cancel()
+
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.applySwipeStretchReset()
+        }
+        swipeStretchResetWorkItem = workItem
+        DispatchQueue.main.async(execute: workItem)
+    }
+
+    private func applySwipeStretchReset() {
+        swipeStretchResetWorkItem = nil
+        guard swipeStretchProgress > 0 || swipeInteraction != nil else { return }
+
+        withAnimation(animations.stretchReset) {
+            swipeStretchProgress = 0
+            swipeInteraction = nil
+        }
+    }
+    
+    func handleActiveContentTap() {
+        guard settings.isNotchTapToExpandEnabled,
+              canExpandActiveLiveActivity else { return }
+
+        performActiveLiveActivityExpansion()
+    }
+
+    func expandActiveLiveActivity() {
+        guard canExpandActiveLiveActivity else { return }
+
+        performActiveLiveActivityExpansion()
+    }
+
+    private func performActiveLiveActivityExpansion() {
+        expansionTransitionTask?.cancel()
+        isExpandingLiveActivityTransition = true
+
+        expansionTransitionTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: ExpansionTransitionTiming.preparationDelay)
+            guard let self, !Task.isCancelled else { return }
+
+            self.engine.handleActiveContentTap()
+
+            try? await Task.sleep(nanoseconds: ExpansionTransitionTiming.resetDelay)
+            guard !Task.isCancelled else { return }
+
+            self.isExpandingLiveActivityTransition = false
+            self.expansionTransitionTask = nil
+        }
+    }
+    
+    func handleOutsideClick() {
+        engine.handleOutsideClick()
+    }
+    
+    func handleStrokeVisibility() {
+        engine.handleStrokeVisibility()
+    }
+    
+    private var easedSwipeStretchProgress: CGFloat {
+        1 - pow(1 - swipeStretchProgress, 2)
+    }
+
+    private var isHoldingStrokeAfterContentHide: Bool {
+        showNotch &&
+        displayedContent == nil &&
+        notchModel.content == nil
+    }
+
+    private var displayedNotchModel: NotchModel {
+        guard isActivityPresentationHidden else {
+            return notchModel
+        }
+
+        var model = notchModel
+        model.liveActivityContent = nil
+        model.isLiveActivityExpanded = false
+        return model
+    }
+
+    func contentTransition(notchWidth: CGFloat, notchHeight: CGFloat, baseHeight: CGFloat, isExpandedPresentation: Bool, isCompactRemovalForExpansion: Bool = false) -> AnyTransition {
+
+        let animation = isExpandedPresentation
+            ? animations.expandLiveActivityContentTransition
+            : animations.openContentTransition
+
+        return .dynamicIslandContent(
+            notchWidth: notchWidth,
+            notchHeight: notchHeight,
+            baseHeight: baseHeight,
+            isExpandedPresentation: isExpandedPresentation,
+            isCompactRemovalForExpansion: isCompactRemovalForExpansion
+        )
+        .animation(animation)
+    }
+    
+    private func bindEngine() {
+        notchModel = engine.notchModel
+        showNotch = engine.showNotch
+        cachedStrokeColor = engine.cachedStrokeColor
+        stagedNotchHeight = engine.notchModel.size.height
+        isClosingHeightStaged = false
+        
+        engine.$notchModel
+            .dropFirst()
+            .sink { [weak self] in
+                self?.scheduleStagedHeightUpdate(to: $0.size.height)
+                self?.notchModel = $0
+            }
+            .store(in: &cancellables)
+        
+        engine.$showNotch
+            .sink { [weak self] in
+                self?.showNotch = $0
+            }
+            .store(in: &cancellables)
+        
+        engine.$cachedStrokeColor
+            .sink { [weak self] in
+                self?.cachedStrokeColor = $0
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: .notchContentPrioritiesDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.engine.refreshLiveActivityPriorities()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func scheduleStagedHeightUpdate(to targetHeight: CGFloat) {
+        stagedHeightTask?.cancel()
+
+        guard !isSwipeInteractionActive else {
+            isClosingHeightStaged = false
+            stagedNotchHeight = targetHeight
+            return
+        }
+
+        let currentHeight = stagedNotchHeight
+
+        guard abs(currentHeight - targetHeight) > 0.5 else {
+            isClosingHeightStaged = false
+            stagedNotchHeight = targetHeight
+            return
+        }
+
+        guard targetHeight < currentHeight else {
+            isClosingHeightStaged = false
+            stagedNotchHeight = targetHeight
+            return
+        }
+
+        isClosingHeightStaged = true
+
+        let leadHeight = intermediateHeight(from: currentHeight, to: targetHeight)
+
+        applyStagedHeight(leadHeight, animated: true)
+
+        guard abs(leadHeight - targetHeight) > 0.5 else {
+            isClosingHeightStaged = false
+            stagedNotchHeight = targetHeight
+            return
+        }
+
+        stagedHeightTask = Task { [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(SurfaceResizeMetrics.heightFollowUpDelay * 1_000_000_000)
+            )
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                self?.applyStagedHeight(targetHeight, animated: true)
+                self?.isClosingHeightStaged = false
+            }
+        }
+    }
+
+    private func applyStagedHeight(_ targetHeight: CGFloat, animated: Bool) {
+        guard animated, let animation = surfaceSizeAnimation else {
+            stagedNotchHeight = targetHeight
+            return
+        }
+
+        withAnimation(animation) {
+            stagedNotchHeight = targetHeight
+        }
+    }
+
+    private func intermediateHeight(from currentHeight: CGFloat, to targetHeight: CGFloat) -> CGFloat {
+        let delta = targetHeight - currentHeight
+        let clampedLeadDelta = min(
+            abs(delta),
+            max(
+                abs(delta) * SurfaceResizeMetrics.heightLeadDeltaFactor,
+                SurfaceResizeMetrics.heightLeadDeltaMinimum
+            ),
+            SurfaceResizeMetrics.heightLeadDeltaMaximum
+        )
+
+        return currentHeight + (delta.sign == .minus ? -clampedLeadDelta : clampedLeadDelta)
+    }
+}

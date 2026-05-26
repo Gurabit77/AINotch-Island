@@ -1,0 +1,37 @@
+# macOS
+.DS_Store
+*.swp
+*.lock
+
+# Xcode build artefacts
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdatad/
+xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Swift Package Manager
+.build/
+Packages/
+Package.resolved
+.swiftpm/
+
+# CocoaPods / Carthage
+Pods/
+Carthage/Build/
+
+# IDE
+.idea/
+*.code-workspace
+.vscode/
+
+# Secrets
+*.env
+*.key
+*.pem
+*.p8
+
+# Log / tmp
+*.log
+*.tmp
